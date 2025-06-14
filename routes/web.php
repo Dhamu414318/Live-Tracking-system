@@ -1,7 +1,8 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-
+use App\Http\Controllers\Auth\LoginController;
+use App\Models\User;
 /*
 |--------------------------------------------------------------------------
 | Web Routes
@@ -32,4 +33,15 @@ Route::get('/envtest', function () {
         'ssl_ca_exists'  => file_exists(env('MYSQL_ATTR_SSL_CA')) ? 'yes' : 'no',
         'ssl_path'       => env('MYSQL_ATTR_SSL_CA'),
     ]);
+});
+
+
+
+Route::get('login', [LoginController::class, 'showLoginForm'])->name('login');
+Route::post('login', [LoginController::class, 'login'])->name('hi');
+
+
+// Protected Page (Web only)
+Route::get('/home', function () {
+    return 'Welcome, you are logged in!';
 });
