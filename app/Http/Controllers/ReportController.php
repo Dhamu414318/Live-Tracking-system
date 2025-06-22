@@ -8,6 +8,7 @@ use App\Models\Alert;
 use App\Models\Position;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;
 
 class ReportController extends Controller
@@ -84,6 +85,16 @@ class ReportController extends Controller
                 return [
                     'start' => Carbon::now()->subDays(7),
                     'end' => Carbon::now()
+                ];
+            case 'this_month':
+                return [
+                    'start' => Carbon::now()->startOfMonth(),
+                    'end' => Carbon::now()->endOfMonth()
+                ];
+            case 'previous_month':
+                return [
+                    'start' => Carbon::now()->subMonthNoOverflow()->startOfMonth(),
+                    'end' => Carbon::now()->subMonthNoOverflow()->endOfMonth()
                 ];
             case 'month':
                 return [
@@ -453,31 +464,263 @@ class ReportController extends Controller
 
     public function trips(Request $request)
     {
-        // Trips report implementation
-        return response()->json(['message' => 'Trips report to be implemented']);
+        $deviceId = $request->get('device_id');
+        $period = $request->get('period', 'this_month');
+        $columns = $request->get('columns');
+    
+        if (is_string($columns)) {
+            $columns = explode(',', $columns);
+        } elseif ($columns === null) {
+            $columns = ['start_time', 'end_time', 'distance', 'average_speed'];
+        }
+    
+        $dates = $this->getDateRange($period);
+    
+        $query = Trip::with('device')
+            ->whereBetween('start_time', [$dates['start'], $dates['end']]);
+    
+        if ($deviceId) {
+            $query->where('device_id', $deviceId);
+        }
+    
+        $trips = $query->latest('start_time')->get();
+    
+        return response()->json($trips->map(function ($trip) use ($columns) {
+            $data = ['id' => $trip->id];
+            foreach ($columns as $column) {
+                switch ($column) {
+                    case 'start_time':
+                        $data['start_time'] = $trip->start_time ? $trip->start_time->format('d/m/Y, H:i A') : 'N/A';
+                        break;
+                    case 'end_time':
+                        $data['end_time'] = $trip->end_time ? $trip->end_time->format('d/m/Y, H:i A') : 'N/A';
+                        break;
+                    case 'distance':
+                        $data['distance'] = $trip->formatted_distance;
+                        break;
+                    case 'average_speed':
+                        $data['average_speed'] = $trip->formatted_avg_speed;
+                        break;
+                    case 'max_speed':
+                        $data['max_speed'] = $trip->formatted_max_speed;
+                        break;
+                    case 'duration':
+                        $data['duration'] = $trip->formatted_duration;
+                        break;
+                }
+            }
+            return $data;
+        }));
     }
 
     public function stops(Request $request)
     {
-        // Stops report implementation
-        return response()->json(['message' => 'Stops report to be implemented']);
+        $deviceId = $request->get('device_id');
+        $period = $request->get('period', 'this_month');
+        $columns = $request->get('columns');
+        $minStopTime = 5; // Minimum stop time in minutes
+
+        if (is_string($columns)) {
+            $columns = explode(',', $columns);
+        } elseif ($columns === null) {
+            $columns = ['start_time', 'end_time', 'duration', 'address'];
+        }
+
+        $dates = $this->getDateRange($period);
+        $query = Position::orderBy('timestamp');
+
+        if ($deviceId) {
+            $query->where('device_id', $deviceId);
+        }
+        $query->whereBetween('timestamp', [$dates['start'], $dates['end']]);
+
+        $positions = $query->get();
+        $stops = [];
+        $currentStop = null;
+
+        foreach ($positions as $position) {
+            if ($position->speed == 0) {
+                if ($currentStop === null) {
+                    $currentStop = [
+                        'start_time' => $position->timestamp,
+                        'end_time' => $position->timestamp,
+                        'latitude' => $position->latitude,
+                        'longitude' => $position->longitude,
+                        'odometer' => $position->distance,
+                    ];
+                } else {
+                    $currentStop['end_time'] = $position->timestamp;
+                }
+            } else {
+                if ($currentStop !== null) {
+                    $duration = $currentStop['start_time']->diffInMinutes($currentStop['end_time']);
+                    if ($duration >= $minStopTime) {
+                        $currentStop['duration'] = $duration;
+                        $stops[] = $currentStop;
+                    }
+                    $currentStop = null;
+                }
+            }
+        }
+
+        if ($currentStop !== null) {
+            $duration = $currentStop['start_time']->diffInMinutes($currentStop['end_time']);
+            if ($duration >= $minStopTime) {
+                $currentStop['duration'] = $duration;
+                $stops[] = $currentStop;
+            }
+        }
+
+        return response()->json(collect($stops)->map(function ($stop) use ($columns) {
+            $data = [];
+            foreach ($columns as $column) {
+                switch ($column) {
+                    case 'start_time':
+                        $data['start_time'] = $stop['start_time']->format('d/m/Y, H:i A');
+                        break;
+                    case 'end_time':
+                        $data['end_time'] = $stop['end_time']->format('d/m/Y, H:i A');
+                        break;
+                    case 'odometer':
+                        $data['odometer'] = number_format($stop['odometer'], 2) . ' km';
+                        break;
+                    case 'address':
+                        $data['address'] = $stop['latitude'] . ', ' . $stop['longitude'];
+                        break;
+                    case 'duration':
+                        $data['duration'] = Carbon::now()->addMinutes($stop['duration'])->diffForHumans(null, true);
+                        break;
+                }
+            }
+            return $data;
+        }));
     }
 
     public function summary(Request $request)
     {
-        // Summary report implementation
-        return response()->json(['message' => 'Summary report to be implemented']);
+        $deviceId = $request->get('device_id');
+        $period = $request->get('period', 'this_month');
+        $columns = $request->get('columns');
+
+        if (is_string($columns)) {
+            $columns = explode(',', $columns);
+        } elseif ($columns === null) {
+            $columns = ['device', 'start_date', 'distance', 'average_speed'];
+        }
+
+        $dates = $this->getDateRange($period);
+
+        $devicesQuery = Device::query();
+
+        if ($deviceId) {
+            $devicesQuery->where('id', $deviceId);
+        }
+
+        $devices = $devicesQuery->with(['trips' => function ($query) use ($dates) {
+            $query->whereBetween('start_time', [$dates['start'], $dates['end']]);
+        }])->get();
+
+        $summaryData = $devices->map(function ($device) use ($dates, $columns) {
+            $totalDistance = $device->trips->sum('distance');
+            $avgSpeed = $device->trips->avg('avg_speed');
+
+            $rowData = [];
+            foreach ($columns as $column) {
+                switch ($column) {
+                    case 'device':
+                        $rowData['device'] = $device->name;
+                        break;
+                    case 'start_date':
+                        $rowData['start_date'] = $dates['start']->format('d/m/Y');
+                        break;
+                    case 'distance':
+                        $rowData['distance'] = number_format($totalDistance, 2) . ' km';
+                        break;
+                    case 'average_speed':
+                        $rowData['average_speed'] = number_format($avgSpeed, 2) . ' km/h';
+                        break;
+                }
+            }
+            return $rowData;
+        })->filter();
+
+        return response()->json($summaryData->values());
     }
 
     public function chart(Request $request)
     {
-        // Chart report implementation
-        return response()->json(['message' => 'Chart report to be implemented']);
+        $deviceId = $request->get('device_id');
+        $period = $request->get('period', 'week');
+        $chartType = $request->get('chart_type', 'speed');
+
+        $dates = $this->getDateRange($period);
+
+        $query = Position::query()->select('timestamp', $chartType)
+            ->whereBetween('timestamp', [$dates['start'], $dates['end']])
+            ->orderBy('timestamp');
+
+        if ($deviceId) {
+            $query->where('device_id', $deviceId);
+        }
+
+        $positions = $query->get();
+
+        $chartData = $positions->map(function ($position) use ($chartType) {
+            return [
+                'x' => $position->timestamp->toIso8601String(),
+                'y' => $position->{$chartType},
+            ];
+        });
+
+        return response()->json($chartData);
     }
 
     public function replay(Request $request)
     {
-        // Replay report implementation
-        return response()->json(['message' => 'Replay report to be implemented']);
+        $request->validate([
+            'device_id' => 'required|integer|exists:devices,id',
+            'period' => 'required|string',
+        ]);
+
+        $deviceId = $request->get('device_id');
+        $period = $request->get('period');
+
+        $dates = $this->getDateRange($period);
+
+        $positions = Position::where('device_id', $deviceId)
+            ->whereBetween('timestamp', [$dates['start'], $dates['end']])
+            ->orderBy('timestamp', 'asc')
+            ->get(['id', 'latitude', 'longitude', 'timestamp', 'speed', 'course', 'distance']);
+
+        return response()->json($positions);
+    }
+
+    public function reverseGeocode(Request $request)
+    {
+        $request->validate([
+            'lat' => 'required|numeric',
+            'lon' => 'required|numeric',
+        ]);
+
+        $lat = $request->get('lat');
+        $lon = $request->get('lon');
+
+        // Using Nominatim for reverse geocoding.
+        // See Nominatim usage policy: https://operations.osmfoundation.org/policies/nominatim/
+        $response = Http::withHeaders([
+            'User-Agent' => config('app.name', 'Laravel') . ' - Geocoding Request',
+        ])->get("https://nominatim.openstreetmap.org/reverse", [
+            'format' => 'jsonv2',
+            'lat' => $lat,
+            'lon' => $lon,
+        ]);
+
+        if ($response->successful()) {
+            return response()->json([
+                'address' => $response->json('display_name', 'Address not found.')
+            ]);
+        }
+
+        return response()->json(['address' => 'Could not retrieve address.'], 500);
     }
 } 
