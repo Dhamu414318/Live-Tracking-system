@@ -2,37 +2,43 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use App\Http\Controllers\Controller;
+use Illuminate\Validation\ValidationException;
 
 class LoginController extends Controller
 {
     public function showLoginForm()
     {
-        // If already logged in
-        if (Auth::check()) {
-            return redirect('/home')->with('status', 'You are already logged in.');
-        }
-
         return view('auth.login');
     }
 
     public function login(Request $request)
     {
-        $request->validate([
+        $credentials = $request->validate([
             'email' => 'required|email',
             'password' => 'required',
         ]);
 
-        $credentials = $request->only('email', 'password');
+        if (Auth::attempt($credentials, $request->boolean('remember'))) {
+            $request->session()->regenerate();
 
-        if (!Auth::attempt($credentials)) {
-            return back()
-                ->withErrors(['email' => 'Login failed! Incorrect credentials.'])
-                ->withInput();
+            return redirect()->intended(route('dashboard'));
         }
 
-        return redirect('/home')->with('status', 'Login successful! Welcome back.');
+        throw ValidationException::withMessages([
+            'email' => ['The provided credentials do not match our records.'],
+        ]);
+    }
+
+    public function logout(Request $request)
+    {
+        Auth::logout();
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return redirect()->route('login');
     }
 }
