@@ -100,7 +100,13 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/reports/combined', [ReportController::class, 'combined'])->name('api.reports.combined');
     Route::get('/api/reports/route', [ReportController::class, 'route'])->name('api.reports.route');
     Route::get('/api/reports/events', [ReportController::class, 'events'])->name('api.reports.events');
-    
+    Route::get('/api/reports/trips', [ReportController::class, 'trips'])->name('api.reports.trips');
+    Route::get('/api/reports/stops', [ReportController::class, 'stops'])->name('api.reports.stops');
+    Route::get('/api/reports/summary', [ReportController::class, 'summary'])->name('api.reports.summary');
+    Route::get('/api/reports/chart', [ReportController::class, 'chart'])->name('api.reports.chart');
+    Route::get('/api/reports/replay', [ReportController::class, 'replay'])->name('api.reports.replay');
+    Route::get('/api/geocode/reverse', [ReportController::class, 'reverseGeocode'])->name('api.geocode.reverse');
+
     // Settings
     Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::post('/settings', [SettingsController::class, 'update'])->name('settings.update');
