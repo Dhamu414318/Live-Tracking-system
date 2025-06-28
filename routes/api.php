@@ -3,6 +3,7 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\PositionController;
+use App\Http\Controllers\Api\MobileController;
 use App\Http\Controllers\ReportController;
 
 /*
@@ -15,6 +16,9 @@ use App\Http\Controllers\ReportController;
 | be assigned to the "api" middleware group. Make something great!
 |
 */
+
+// Single Mobile API endpoint - Everything goes through this one
+Route::post('/mobile/track', [MobileController::class, 'track'])->name('api.mobile.track');
 
 // Public API endpoints for device position updates
 Route::post('/positions', [PositionController::class, 'store'])->name('api.positions.store');

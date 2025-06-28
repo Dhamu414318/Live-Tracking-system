@@ -1,37 +1,48 @@
-FROM php:8.2-apache
+FROM php:8.2-fpm
 
-# Install PHP Extensions
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git unzip zip libzip-dev libpng-dev libonig-dev libxml2-dev curl \
-    && docker-php-ext-install pdo_mysql zip gd mbstring xml
+    git \
+    curl \
+    libpng-dev \
+    libonig-dev \
+    libxml2-dev \
+    libzip-dev \
+    zip \
+    unzip \
+    postgresql-client \
+    libpq-dev
 
-# Enable Apache Rewrite
-RUN a2enmod rewrite
+# Clear cache
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install PHP extensions
+RUN docker-php-ext-install pdo pdo_pgsql mbstring exif pcntl bcmath gd zip
+
+# Get latest Composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 # Set working directory
-WORKDIR /var/www/html
+WORKDIR /var/www
 
-# Copy files
-COPY . .
+# Copy existing application directory contents
+COPY . /var/www
 
-# Permissions
-RUN chown -R www-data:www-data storage bootstrap/cache
+# Copy existing application directory permissions
+COPY --chown=www-data:www-data . /var/www
 
-# Set Apache public folder
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/000-default.conf
-
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Install dependencies
 RUN composer install --no-dev --optimize-autoloader
 
-# Copy TiDB SSL CA certificate
-RUN mkdir -p /etc/ssl/certs
-COPY storage/certs/ca.pem /etc/ssl/certs/ca.pem
+# Generate application key
+RUN php artisan key:generate
 
-# Entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Set permissions
+RUN chmod -R 755 /var/www/storage
+RUN chmod -R 755 /var/www/bootstrap/cache
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["apache2-foreground"]
+# Expose port 8000
+EXPOSE 8000
+
+# Start Laravel development server
+CMD php artisan serve --host=0.0.0.0 --port=8000
